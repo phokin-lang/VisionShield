@@ -37,6 +37,7 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
   const inputRef = useRef(null);
   const playerRef = useRef(null);
   const abortRef = useRef(false);
+  const uploadedAtRef = useRef(null); // when the person chose the file (browser clock)
 
   const [file, setFile] = useState(null);
   const [mediaUrl, setMediaUrl] = useState(null);
@@ -78,6 +79,7 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
     }
     abortRef.current = true;
     setFile(f);
+    uploadedAtRef.current = new Date().toISOString();
     setKind(isVideo ? "video" : "image");
     setMediaUrl(URL.createObjectURL(f));
     setSamples([]);
@@ -219,7 +221,8 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
           const r = await api.notifyViolation({
             file: file.name,
             kind,
-            firstSeen: kind === "video" ? fmt(first.t) : null,
+            uploadedAt: uploadedAtRef.current || new Date().toISOString(),
+            firstSeen: kind === "video" && first.t >= 1 ? fmt(first.t) : null,
             camera: cam ? { name: cam.name, zone: cam.zone } : null,
             violations: Object.entries(maxPerLabel).map(([label, count]) => ({ label, count })),
             flaggedFrames: flagged.length,

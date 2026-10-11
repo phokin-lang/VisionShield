@@ -21,18 +21,21 @@ export function thaiTime(date = new Date()) {
 }
 
 export function buildLineMessage(body = {}) {
-  const { camera, file, kind, firstSeen, violations, flaggedFrames, totalFrames, title, detail } = body;
+  const { camera, file, kind, firstSeen, uploadedAt, violations, flaggedFrames, totalFrames, title, detail } = body;
   const lines = ["🚨 VisionShield แจ้งเตือน", "พบการฝ่าฝืนอุปกรณ์ความปลอดภัย", ""];
 
   const place = camera?.name
     ? `${clip(camera.name, 80)}${camera.zone ? ` (${clip(camera.zone, 80)})` : ""}`
     : "ไม่ระบุกล้อง (วิเคราะห์จากไฟล์ที่อัปโหลด)";
   lines.push(`📍 สถานที่: ${place}`);
-  lines.push(`🕒 เวลา: ${thaiTime()}`);
+  // time the file was uploaded (sent by the browser); fall back to "now" if missing or implausible
+  let when = new Date(uploadedAt);
+  if (!uploadedAt || Number.isNaN(when.getTime()) || Math.abs(Date.now() - when.getTime()) > 24 * 3600 * 1000) when = new Date();
+  lines.push(`🕒 เวลาอัปโหลด: ${thaiTime(when)}`);
 
   if (file) {
     const type = kind === "video" ? "วิดีโอ" : "รูปภาพ";
-    const seen = kind === "video" && firstSeen ? ` (พบครั้งแรกที่ ${clip(firstSeen, 20)})` : "";
+    const seen = kind === "video" && firstSeen ? ` (พบครั้งแรกที่นาที ${clip(firstSeen, 20)} ของวิดีโอ)` : "";
     lines.push(`🎥 ที่มา: ${type} ${clip(file, 100)}${seen}`);
   }
 

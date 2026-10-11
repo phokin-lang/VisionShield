@@ -16,7 +16,7 @@ const CAMERA_DEFS = [
 ];
 
 const MAX_ALERTS = 200;
-const nowTime = () => new Date().toLocaleTimeString("en-GB");
+const nowTime = () => new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Bangkok" });
 
 let cameras = CAMERA_DEFS.map((d) => ({
   ...d,
