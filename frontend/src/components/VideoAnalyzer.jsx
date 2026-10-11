@@ -208,9 +208,22 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
       if (critical.length) {
         try {
           const first = results.find((s) => s.violations?.some((x) => x.severity === "critical"));
+          // most people seen with each violation in any single frame (avoids counting the same person per frame)
+          const maxPerLabel = {};
+          for (const smp of results) {
+            const c = {};
+            for (const v of smp.violations || []) c[v.label] = (c[v.label] || 0) + 1;
+            for (const [l, n] of Object.entries(c)) maxPerLabel[l] = Math.max(maxPerLabel[l] || 0, n);
+          }
+          const cam = cameras.find((c) => c.id === cameraId);
           const r = await api.notifyViolation({
-            title: `${critical.length > 1 ? "Multiple" : "A"} critical PPE violation${critical.length > 1 ? "s" : ""} found`,
-            detail: `${file.name}${kind === "video" ? ` — first seen at ${fmt(first.t)}` : ""}. ${flagged.length} of ${results.length} frames flagged.`
+            file: file.name,
+            kind,
+            firstSeen: kind === "video" ? fmt(first.t) : null,
+            camera: cam ? { name: cam.name, zone: cam.zone } : null,
+            violations: Object.entries(maxPerLabel).map(([label, count]) => ({ label, count })),
+            flaggedFrames: flagged.length,
+            totalFrames: results.length
           });
           setNotified(r);
         } catch {

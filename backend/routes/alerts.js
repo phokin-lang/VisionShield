@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { listAlerts, acknowledgeAlert, getSettings } from "../data/store.js";
 import { pushLine } from "../services/line.js";
+import { buildLineMessage } from "../services/lineMessage.js";
 
 const router = Router();
 
@@ -21,9 +22,8 @@ router.patch("/:id/acknowledge", (req, res) => {
 // contained critical violations. Sends a LINE message only if the LINE toggle is ON.
 router.post("/notify", async (req, res) => {
   if (!getSettings().line) return res.json({ sent: false, reason: "disabled" });
-  const { title = "PPE violation", detail = "" } = req.body || {};
   try {
-    const r = await pushLine(`🚨 VisionShield\n${String(title).slice(0, 200)}\n${String(detail).slice(0, 1500)}`);
+    const r = await pushLine(buildLineMessage(req.body || {}));
     res.json(r);
   } catch (e) {
     res.status(502).json({ sent: false, reason: "network", error: e.message });
