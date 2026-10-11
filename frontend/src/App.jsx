@@ -206,7 +206,7 @@ export default function App() {
 
         <footer className="flex items-center justify-between px-6 py-2.5 border-t border-base-700/60 text-[11px] text-slate-600">
           <span className="flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-safe" /> ArtiSafeSight monitoring platform
+            <span className="h-1.5 w-1.5 rounded-full bg-safe" /> VisionShield monitoring platform
           </span>
           <span>System v2.8.1 · Secure connection</span>
         </footer>

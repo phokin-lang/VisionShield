@@ -1,4 +1,4 @@
-// Native Node inference for ArtiSafeSight — no Python, no PyTorch.
+// Native Node inference for VisionShield — no Python, no PyTorch.
 //
 // Two YOLOv8-nano ONNX models run back-to-back on ONE shared 640x640 tensor:
 //   1. ppe_hat_vest_nano.onnx  — the friend-trained PPE model  (Hard_hat, Vest)

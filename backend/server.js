@@ -56,7 +56,7 @@ app.get("/api/health", (req, res) => {
   const det = detectorStatus();
   res.status(det.ready ? 200 : 503).json({
     status: det.ready ? "ok" : "starting",
-    service: "artisafesight-backend",
+    service: "visionshield-backend",
     time: new Date().toISOString(),
     model: det,
     memory: { rssMB: Math.round(m.rss / 1048576), heapUsedMB: Math.round(m.heapUsed / 1048576) }
@@ -83,7 +83,7 @@ app.use((err, req, res, next) => {
 });
 
 const server = app.listen(PORT, () => {
-  console.log(`ArtiSafeSight backend listening on :${PORT}`);
+  console.log(`VisionShield backend listening on :${PORT}`);
   // Bind the port first (Render needs it fast), then load models + scan in the background.
   (async () => {
     await seedAdmin();

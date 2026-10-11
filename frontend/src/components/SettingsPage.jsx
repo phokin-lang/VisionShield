@@ -108,7 +108,7 @@ export default function SettingsPage({ onChange }) {
       <div className="rounded-xl border border-base-700/60 bg-base-900 max-w-2xl mb-4 flex items-center justify-between gap-4 px-5 py-4">
         <div>
           <p className="text-sm font-medium text-slate-200">Appearance</p>
-          <p className="text-xs text-slate-500 mt-0.5">Choose how ArtiSafeSight looks on this device.</p>
+          <p className="text-xs text-slate-500 mt-0.5">Choose how VisionShield looks on this device.</p>
         </div>
         <div className="flex rounded-lg border border-base-700/60 p-0.5 bg-base-850">
           {[

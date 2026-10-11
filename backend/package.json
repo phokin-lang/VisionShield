@@ -1,7 +1,7 @@
 {
   "name": "artisafesight-backend",
   "version": "1.0.0",
-  "description": "ArtiSafeSight Safety Monitoring - Backend API",
+  "description": "VisionShield Safety Monitoring - Backend API",
   "main": "server.js",
   "type": "module",
   "scripts": {

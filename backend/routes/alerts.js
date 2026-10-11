@@ -23,7 +23,7 @@ router.post("/notify", async (req, res) => {
   if (!getSettings().line) return res.json({ sent: false, reason: "disabled" });
   const { title = "PPE violation", detail = "" } = req.body || {};
   try {
-    const r = await pushLine(`🚨 ArtiSafeSight\n${String(title).slice(0, 200)}\n${String(detail).slice(0, 1500)}`);
+    const r = await pushLine(`🚨 VisionShield\n${String(title).slice(0, 200)}\n${String(detail).slice(0, 1500)}`);
     res.json(r);
   } catch (e) {
     res.status(502).json({ sent: false, reason: "network", error: e.message });

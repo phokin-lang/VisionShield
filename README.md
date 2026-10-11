@@ -1,11 +1,11 @@
-# ArtiSafeSight — Safety Monitoring Dashboard
+# VisionShield — Smart CCTV for Safer Tomorrow
 
 A full-stack clone of the safety-monitoring dashboard: a dark, "safety-tech" themed
 live camera wall with AI detection overlays, summary stats, and a violations feed —
 backed by its own REST API.
 
 ```
-artisafesight/
+visionshield/
 ├── backend/     Express REST API (cameras, alerts, stats)
 └── frontend/    React + Vite + Tailwind dashboard UI
 ```

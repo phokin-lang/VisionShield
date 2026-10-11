@@ -32,7 +32,7 @@ router.put("/", (req, res) => {
 // POST /api/settings/line-test — send a test message so the user can verify the LINE setup
 router.post("/line-test", async (req, res) => {
   try {
-    const r = await pushLine("✅ ArtiSafeSight: LINE notifications are working.", { force: true });
+    const r = await pushLine("✅ VisionShield: LINE notifications are working.", { force: true });
     res.json(r);
   } catch (e) {
     res.status(502).json({ sent: false, reason: "network", error: e.message });

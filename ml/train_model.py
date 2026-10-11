@@ -1,5 +1,5 @@
 """
-Fine-tune a YOLOv8 model on the ArtiSafeSight PPE-Detection dataset.
+Fine-tune a YOLOv8 model on the VisionShield PPE-Detection dataset.
 
 Requires a GPU for a reasonable training time (CPU-only will work but is very
 slow). Run this on your own machine or a free Google Colab GPU runtime, then

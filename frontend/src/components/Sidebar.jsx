@@ -4,7 +4,6 @@ import {
   Video,
   History,
   Settings,
-  ShieldCheck,
   ChevronDown,
   HelpCircle,
   X
@@ -27,11 +26,9 @@ export default function Sidebar({ active, onNavigate, forceVisible = false, badg
       } w-64 shrink-0 flex-col border-r border-base-700/60 bg-base-900`}
     >
       <div className="flex items-center gap-2.5 px-5 py-5 border-b border-base-700/60">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-accent/15 text-cyan-accent">
-          <ShieldCheck size={18} strokeWidth={2.2} />
-        </div>
+        <img src="/logo-icon.png" alt="" className="h-9 w-9 shrink-0 select-none object-contain" draggable={false} />
         <div>
-          <p className="font-display font-semibold text-sm text-white leading-none">ArtiSafeSight</p>
+          <p className="font-display font-semibold text-sm text-white leading-none">VisionShield</p>
           <p className="text-[11px] text-slate-500 mt-1">Safety Intelligence</p>
         </div>
       </div>

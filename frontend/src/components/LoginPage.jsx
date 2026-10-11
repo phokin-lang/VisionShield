@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ShieldCheck, LogIn, UserPlus } from "lucide-react";
+import { LogIn, UserPlus } from "lucide-react";
 import { authApi } from "../api.js";
 
 export default function LoginPage({ onSuccess }) {
@@ -35,9 +35,8 @@ export default function LoginPage({ onSuccess }) {
   return (
     <div className="flex h-screen items-center justify-center bg-base-950 px-4">
       <div className="w-full max-w-sm">
-        <div className="flex items-center gap-2 justify-center mb-6">
-          <ShieldCheck className="text-cyan-accent" size={22} />
-          <span className="text-lg font-display font-semibold text-white">ArtiSafeSight</span>
+        <div className="flex justify-center mb-6">
+          <img src="/logo-full.png" alt="VisionShield — Smart CCTV for safer tomorrow" className="h-40 w-auto select-none" draggable={false} />
         </div>
 
         <div className="rounded-xl border border-base-700/60 bg-base-900/80 p-6">
