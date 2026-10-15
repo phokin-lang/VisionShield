@@ -300,6 +300,15 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
 
   const overlay = (
     <>
+      {/* privacy blur FIRST: later layers (boxes + labels) are drawn on top, so the blur never covers them */}
+      {blurFaces &&
+        faces.map((f, i) => (
+          <div
+            key={`f${i}`}
+            className="face-blur absolute pointer-events-none"
+            style={{ left: `${f.x}%`, top: `${f.y}%`, width: `${f.w}%`, height: `${f.h}%` }}
+          />
+        ))}
       {dets.map((d, i) => (
         <div
           key={i}
@@ -337,14 +346,6 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
           </div>
         );
       })}
-      {blurFaces &&
-        faces.map((f, i) => (
-          <div
-            key={`f${i}`}
-            className="face-blur absolute pointer-events-none"
-            style={{ left: `${f.x}%`, top: `${f.y}%`, width: `${f.w}%`, height: `${f.h}%` }}
-          />
-        ))}
     </>
   );
 
