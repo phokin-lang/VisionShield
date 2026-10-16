@@ -32,3 +32,12 @@ Thumbs.db
 
 # Optional: test/coverage output
 coverage/
+
+# ML datasets / training output
+ml/dataset/
+ml/dataset_ppe/
+ml/runs/
+runs/
+*.onnx.bak
+*.cache
+__pycache__/
