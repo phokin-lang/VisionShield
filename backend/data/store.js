@@ -1,8 +1,15 @@
-// In-memory store for cameras, alerts and settings.
+// Store for cameras, alerts and settings.
 //
 // Detections are NOT hand-written anymore: services/cameraScanner.js runs the
-// PPE model on each camera frame and calls applyScan() below. Swap this module
-// for a real DB later — the exported function signatures are all the routes use.
+// PPE model on each camera frame and calls applyScan() below. The exported
+// function signatures are all the routes use.
+//
+// Everything is served from memory. When MONGODB_URI is set, initStore() loads
+// the saved state on boot and every change is written back in the background:
+//   cameras         one doc per camera (live state, not the fixed name/zone/image)
+//   camera_sources  the uploaded JPEG shown on a camera tile
+//   state           { _id: "settings" } and { _id: "alerts", items: [...] }
+import { getDb, persist } from "./db.js";
 
 const CAMERA_DEFS = [
   { id: "cam-01", name: "North Entrance", zone: "Building A · Ground Floor", image: "ppe/cam1.jpg" },
@@ -48,6 +55,61 @@ let settings = {
 };
 
 export const cameraDefs = CAMERA_DEFS;
+
+// ---- MongoDB persistence (all no-ops without MONGODB_URI) ----
+
+const DEF_FIELDS = ["id", "name", "zone", "image"]; // always taken from CAMERA_DEFS, never from the DB
+
+function saveCamera(camera) {
+  persist(`camera:${camera.id}`, (db) => {
+    const doc = { ...camera };
+    for (const k of DEF_FIELDS) delete doc[k];
+    return db.collection("cameras").replaceOne({ _id: camera.id }, doc, { upsert: true });
+  });
+}
+
+function saveAlerts() {
+  persist("alerts", (db) => db.collection("state").replaceOne({ _id: "alerts" }, { items: alerts }, { upsert: true }));
+}
+
+function saveSettings() {
+  persist("settings", (db) => db.collection("state").replaceOne({ _id: "settings" }, settings, { upsert: true }));
+}
+
+function saveSource(cameraId) {
+  persist(`source:${cameraId}`, (db) => {
+    const src = sources.get(cameraId);
+    const col = db.collection("camera_sources");
+    return src ? col.replaceOne({ _id: cameraId }, src, { upsert: true }) : col.deleteOne({ _id: cameraId });
+  });
+}
+
+/** Load saved cameras, alerts, settings and tile media from MongoDB. Call once on boot. */
+export async function initStore() {
+  const db = getDb();
+  if (!db) return;
+
+  const [camDocs, srcDocs, stateDocs] = await Promise.all([
+    db.collection("cameras").find({}).toArray(),
+    db.collection("camera_sources").find({}).toArray(),
+    db.collection("state").find({}).toArray()
+  ]);
+
+  for (const { _id, ...saved } of camDocs) {
+    const camera = getCamera(_id);
+    if (!camera) continue; // camera no longer defined in CAMERA_DEFS
+    for (const k of DEF_FIELDS) delete saved[k];
+    Object.assign(camera, saved);
+  }
+  for (const { _id, jpeg, label, version } of srcDocs) {
+    if (getCamera(_id)) sources.set(_id, { jpeg: Buffer.isBuffer(jpeg) ? jpeg : Buffer.from(jpeg.buffer), label, version });
+  }
+  for (const { _id, ...doc } of stateDocs) {
+    if (_id === "settings") settings = { ...settings, ...doc };
+    if (_id === "alerts") alerts = (doc.items || []).slice(0, MAX_ALERTS);
+  }
+  console.log(`[db] loaded ${camDocs.length} camera(s), ${srcDocs.length} tile image(s), ${alerts.length} alert(s)`);
+}
 
 export function listCameras() {
   return cameras;
@@ -106,6 +168,8 @@ export function applyScan(cameraId, { violations, summary, faces, imageWidth, im
   }
   // newest first
   alerts.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  saveCamera(camera);
+  saveAlerts();
   return camera;
 }
 
@@ -118,6 +182,8 @@ export function addDetection(cameraId, detection) {
   camera.status = "live";
   camera.timestamp = nowTime();
   pushAlert(camera, detection, "upload");
+  saveCamera(camera);
+  saveAlerts();
   return newDetection;
 }
 
@@ -125,6 +191,7 @@ export function acknowledgeAlert(id) {
   const alert = alerts.find((a) => a.id === id);
   if (!alert) return null;
   alert.acknowledged = true;
+  saveAlerts();
   return alert;
 }
 
@@ -157,6 +224,7 @@ export function getSettings() {
 
 export function updateSettings(patch) {
   settings = { ...settings, ...patch };
+  saveSettings();
   return settings;
 }
 
@@ -167,6 +235,8 @@ export function setCameraSource(cameraId, jpeg, label) {
   sources.set(cameraId, { jpeg, label: label || "Uploaded media", version });
   camera.sourceLabel = label || "Uploaded media";
   camera.sourceVersion = version;
+  saveSource(cameraId);
+  saveCamera(camera);
   return camera;
 }
 
@@ -176,6 +246,8 @@ export function clearCameraSource(cameraId) {
   sources.delete(cameraId);
   camera.sourceLabel = null;
   camera.sourceVersion = null;
+  saveSource(cameraId);
+  saveCamera(camera);
   return camera;
 }
 

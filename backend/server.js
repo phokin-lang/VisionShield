@@ -10,7 +10,9 @@ import detectRouter from "./routes/detect.js";
 import { requireAuth } from "./middleware/auth.js";
 import { loadModels, status as detectorStatus } from "./services/detector.js";
 import { scanAllCameras } from "./services/cameraScanner.js";
-import { seedAdmin } from "./data/users.js";
+import { seedAdmin, initUsers } from "./data/users.js";
+import { initStore } from "./data/store.js";
+import { connectDb, closeDb } from "./data/db.js";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -86,6 +88,9 @@ const server = app.listen(PORT, () => {
   console.log(`VisionShield backend listening on :${PORT}`);
   // Bind the port first (Render needs it fast), then load models + scan in the background.
   (async () => {
+    await connectDb(); // no-op without MONGODB_URI
+    await initUsers();
+    await initStore();
     await seedAdmin();
     await loadModels();
     await scanAllCameras();
@@ -97,6 +102,7 @@ const server = app.listen(PORT, () => {
 process.on("unhandledRejection", (e) => console.error("[unhandledRejection]", e));
 process.on("SIGTERM", () => {
   console.log("SIGTERM received, shutting down");
-  server.close(() => process.exit(0));
+  // write any queued MongoDB changes before exiting
+  server.close(() => closeDb().catch(() => {}).finally(() => process.exit(0)));
   setTimeout(() => process.exit(0), 5000).unref();
 });
