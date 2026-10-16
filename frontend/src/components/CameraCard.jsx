@@ -3,7 +3,7 @@ import { RotateCcw, Paperclip } from "lucide-react";
 import { api } from "../api.js";
 import DetectionImage from "./DetectionImage.jsx";
 import useCameraSrc from "./useCameraSrc.js";
-import { ZoneShapes, VehicleBoxes } from "./ZoneLayer.jsx";
+import { ZoneShapes, VehicleBoxes, HeadBoxes } from "./ZoneLayer.jsx";
 
 const SEVERITY_STYLES = {
   critical: { border: "border-alert-critical", text: "text-alert-critical", bg: "bg-alert-critical" },
@@ -70,9 +70,10 @@ export default function CameraCard({ camera, blurFaces = false, onRestore }) {
             />
           ))}
 
-        {/* danger zones (translucent red) and vehicles (orange) under the violation boxes */}
+        {/* danger zones (translucent red), vehicles (orange) and bare heads (red) under the violation boxes */}
         <ZoneShapes zones={camera.zones} />
         <VehicleBoxes objects={camera.objects} />
+        <HeadBoxes objects={camera.objects} />
 
         {/* Detection bounding boxes (drawn in the image's own coordinate space) */}
         {camera.detections.map((d, idx) => {

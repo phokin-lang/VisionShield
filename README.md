@@ -88,3 +88,4 @@ so real detection coordinates from a model can be dropped in directly.
 ## Credits
 - Built on top of [67160231-x/VisionShield](https://github.com/67160231-x/VisionShield).
 - The PPE detection model (`ml/model/ppe_hat_vest_nano.pt`, Hard_hat + Vest) was trained by a friend in our project group.
+- The hard-hat model v2 (`ml/model/hardhat_v2.pt` / `backend/models/hardhat_v2.onnx`, YOLO11n, one class `head` = head without a hard hat) was trained by us on the [Hard Hat Workers dataset](https://public.roboflow.com/object-detection/hard-hat-workers) (Roboflow, Public Domain).

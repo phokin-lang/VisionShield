@@ -5,6 +5,9 @@
 //   2. person_yolov8n.onnx     — stock COCO YOLOv8n: Person + vehicles + cell phone
 //   3. face_scrfd_500m.onnx    — SCRFD-500M face detector (2.5 MB), only used for the
 //                                "blur worker faces" privacy setting
+//   4. hardhat_v2.onnx         — optional YOLO11n, one class "head" = a head WITHOUT a hard hat.
+//                                When present it decides "No Hard Hat Detected" (see bareHeads);
+//                                without it the older person-box rule (wearsHat) is used.
 // A person with no Hard_hat / Vest on their body => compliance violation.
 // Hazard rules (danger zone, vehicle proximity, fall, crowding, phone use) reuse the
 // same model outputs — no extra model is loaded for them.
@@ -19,6 +22,7 @@
 
 import * as ort from "onnxruntime-node";
 import sharp from "sharp";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -39,6 +43,7 @@ export const CONFIG = {
   ppeConf: Number(process.env.PPE_CONF || 0.5),
   personConf: Number(process.env.PERSON_CONF || 0.4),
   objectConf: Number(process.env.OBJECT_CONF || 0.35), // vehicles + cell phone
+  headConf: Number(process.env.HEAD_CONF || 0.45), // hardhat_v2 "head" (no hard hat)
   faceConf: Number(process.env.FACE_CONF || 0.45),
   iou: Number(process.env.NMS_IOU || 0.6),
   maxQueue: Number(process.env.MAX_INFERENCE_QUEUE || 4),
@@ -51,7 +56,9 @@ sharp.concurrency(1);
 let ppeSession = null;
 let personSession = null;
 let faceSession = null;
-let inputName = { ppe: null, person: null, face: null };
+let headSession = null;
+let inputName = { ppe: null, person: null, face: null, head: null };
+const HEAD_MODEL = "hardhat_v2.onnx";
 let ready = false;
 let loadError = null;
 
@@ -279,22 +286,70 @@ function zoneBox(points) {
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
 
+// ---- hard hat rule with hardhat_v2 ("head" = a head without a hard hat) ----
+// A head box only counts as bare when the PPE model has no Hard_hat on it: a hat that overlaps
+// the head, or sits above it within one head-height, with >= 30% horizontal overlap.
+function hatCoversHead(hat, head) {
+  const xOverlap = Math.min(hat.x + hat.w, head.x + head.w) - Math.max(hat.x, head.x);
+  if (xOverlap < 0.3 * head.w) return false;
+  if (hat.y > head.y + head.h) return false; // hat is below the head
+  const gapAbove = head.y - (hat.y + hat.h); // > 0 when the hat ends above the head's top
+  return gapAbove <= head.h;
+}
+
+function bareHeads(heads, hats) {
+  return heads.filter((h) => !hats.some((hat) => hatCoversHead(hat.box, h.box)));
+}
+
+// head centre inside the person horizontally and in the top 45% of their box
+function headOf(person, heads) {
+  const p = person.box;
+  return heads.find((h) => {
+    const { cx, cy } = center(h.box);
+    return cx >= p.x && cx <= p.x + p.w && cy >= p.y && cy <= p.y + 0.45 * p.h;
+  });
+}
+
+const insideBox = (h, p) => {
+  const { cx, cy } = center(h.box);
+  return cx >= p.x && cx <= p.x + p.w && cy >= p.y && cy <= p.y + p.h;
+};
+
 export function evaluate(detections, rules, zones, geo) {
   const people = detections.filter((d) => d.label === "Person");
   const hats = detections.filter((d) => d.label === "Hard_hat");
   const vests = detections.filter((d) => d.label === "Vest");
   const vehicles = detections.filter((d) => VEHICLE_LABELS.includes(d.label));
   const phones = detections.filter((d) => d.label === "Cell_phone");
+  const heads = detections.filter((d) => d.label === "Head");
+  const useHeadModel = Boolean(headSession) || heads.length > 0;
+  const bare = useHeadModel ? bareHeads(heads, hats) : [];
 
   const violations = [];
   for (const person of people) {
     // ignore tiny background people — too small for PPE to be judged reliably
     if (person.box.h < 8 || person.box.w < 2) continue;
-    if (rules.hardhat && !wearsHat(person, hats)) {
+    const noHat = useHeadModel ? Boolean(headOf(person, bare)) : !wearsHat(person, hats);
+    if (rules.hardhat && noHat) {
       violations.push({ rule: "hardhat", label: "No Hard Hat Detected", severity: "critical", box: person.box });
     }
     if (rules.vest && !wearsVest(person, vests)) {
       violations.push({ rule: "vest", label: "No Safety Vest Detected", severity: "medium", box: person.box });
+    }
+  }
+
+  // a bare head the person model missed entirely: alert on the head, grown 3x downwards
+  if (rules.hardhat) {
+    for (const h of bare) {
+      if (people.some((p) => insideBox(h, p.box))) continue;
+      const b = h.box;
+      violations.push({
+        rule: "hardhat",
+        label: "No Hard Hat Detected",
+        severity: "critical",
+        source: "head_only",
+        box: { x: b.x, y: b.y, w: b.w, h: Math.round(Math.min(b.h * 3, 100 - b.y) * 10) / 10 }
+      });
     }
   }
 
@@ -510,10 +565,20 @@ export async function loadModels() {
       faceSession = null;
       console.warn("[detector] face model not loaded, blur falls back to head-box heuristic:", e.message);
     }
+    const headPath = path.join(MODELS_DIR, HEAD_MODEL);
+    headSession = null;
+    if (fs.existsSync(headPath)) {
+      try {
+        headSession = await ort.InferenceSession.create(headPath, SESSION_OPTS);
+      } catch (e) {
+        console.warn(`[detector] ${HEAD_MODEL} not loaded, using the PPE hard-hat rule:`, e.message);
+      }
+    }
     inputName = {
       ppe: ppeSession.inputNames[0],
       person: personSession.inputNames[0],
-      face: faceSession ? faceSession.inputNames[0] : null
+      face: faceSession ? faceSession.inputNames[0] : null,
+      head: headSession ? headSession.inputNames[0] : null
     };
 
     // warm-up: allocate everything now, with a blank gray frame
@@ -522,9 +587,10 @@ export async function loadModels() {
     await ppeSession.run({ [inputName.ppe]: t });
     await personSession.run({ [inputName.person]: t });
     if (faceSession) await faceSession.run({ [inputName.face]: faceNorm(t) });
+    if (headSession) await headSession.run({ [inputName.head]: t });
 
     ready = true;
-    console.log(`[detector] models loaded + warmed in ${Date.now() - t0} ms`);
+    console.log(`[detector] models loaded + warmed in ${Date.now() - t0} ms (hard hat rule: ${headSession ? "hardhat_v2" : "ppe"})`);
   } catch (err) {
     loadError = err;
     ready = false;
@@ -539,10 +605,18 @@ export function status() {
     models: {
       ppe: "ppe_hat_vest_nano.onnx",
       person: "person_yolov8n.onnx",
-      face: faceSession ? "face_scrfd_500m.onnx" : null
+      face: faceSession ? "face_scrfd_500m.onnx" : null,
+      hardhat: headSession ? HEAD_MODEL : null
     },
-    classes: [...Object.values(COCO), ...PPE_CLASSES],
-    config: { ppeConf: CONFIG.ppeConf, personConf: CONFIG.personConf, objectConf: CONFIG.objectConf, iou: CONFIG.iou }
+    hatRule: headSession ? "hardhat_v2" : "ppe",
+    classes: [...Object.values(COCO), ...PPE_CLASSES, ...(headSession ? ["Head"] : [])],
+    config: {
+      ppeConf: CONFIG.ppeConf,
+      personConf: CONFIG.personConf,
+      objectConf: CONFIG.objectConf,
+      headConf: CONFIG.headConf,
+      iou: CONFIG.iou
+    }
   };
 }
 
@@ -593,7 +667,14 @@ export function detect(buffer, settings = {}, { zones = [] } = {}) {
       .map((d) => ({ label: COCO[d.cls], confidence: d.confidence, box: d.box }));
     personOut.dispose?.();
 
-    const raw = [...cocoDets, ...ppeDets];
+    let headDets = [];
+    if (headSession) {
+      const headOut = (await headSession.run({ [inputName.head]: tensor }))[headSession.outputNames[0]];
+      headDets = decode(headOut, 1, [0], CONFIG.headConf, geo).map((d) => ({ label: "Head", confidence: d.confidence, box: d.box }));
+      headOut.dispose?.();
+    }
+
+    const raw = [...cocoDets, ...ppeDets, ...headDets];
     const summary = evaluate(raw, rules, validZones, geo);
 
     // real face boxes (SCRFD) for the privacy blur; heuristic head boxes only as a fallback

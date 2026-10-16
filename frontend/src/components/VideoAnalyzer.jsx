@@ -20,7 +20,8 @@ const LABEL_COLORS = {
   Motorcycle: VEHICLE,
   Bus: VEHICLE,
   Truck: VEHICLE,
-  Cell_phone: "#c084fc"
+  Cell_phone: "#c084fc",
+  Head: "#ef4a4a" // head without a hard hat (hardhat_v2)
 };
 // hazard rules always go to LINE; PPE rules only when critical (no hard hat)
 const HAZARD_RULES = ["danger_zone", "vehicle_proximity", "fall", "crowding", "phone_use"];

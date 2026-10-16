@@ -1,6 +1,7 @@
 // Overlays drawn in the image's own % coordinate space (children of DetectionImage).
 
 export const VEHICLE_COLOR = "#f97316";
+export const HEAD_COLOR = "#ef4a4a";
 const VEHICLES = ["Bicycle", "Car", "Motorcycle", "Bus", "Truck"];
 
 /** Danger zones as translucent red polygons. `draft` = polygon being drawn (open path). */
@@ -51,6 +52,20 @@ export function ZoneShapes({ zones = [], draft = null, highlight = null }) {
       ))}
     </>
   );
+}
+
+/** Red boxes for heads without a hard hat (hardhat_v2 model). */
+export function HeadBoxes({ objects = [] }) {
+  return objects
+    .filter((o) => o.label === "Head" && o.box)
+    .map((o, i) => (
+      <div
+        key={`head${i}`}
+        title={`Head without hard hat ${Math.round((o.confidence || 0) * 100)}%`}
+        className="pointer-events-none absolute rounded-sm border-2"
+        style={{ borderColor: HEAD_COLOR, left: `${o.box.x}%`, top: `${o.box.y}%`, width: `${o.box.w}%`, height: `${o.box.h}%` }}
+      />
+    ));
 }
 
 /** Orange boxes for vehicles the model saw in the frame. */

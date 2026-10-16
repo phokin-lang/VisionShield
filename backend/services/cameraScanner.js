@@ -6,7 +6,8 @@ import { detect, status as detectorStatus, VEHICLE_LABELS } from "./detector.js"
 import { cameraDefs, applyScan, getSettings, getCameraSource, getCamera } from "../data/store.js";
 
 // non-violation objects worth drawing on the camera tile
-export const objectsOf = (raw) => raw.filter((d) => VEHICLE_LABELS.includes(d.label) || d.label === "Cell_phone");
+export const objectsOf = (raw) =>
+  raw.filter((d) => VEHICLE_LABELS.includes(d.label) || d.label === "Cell_phone" || d.label === "Head");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = path.join(__dirname, "..", "assets", "cameras");
