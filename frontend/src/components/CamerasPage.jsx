@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Loader2, ScanSearch } from "lucide-react";
+import { Hexagon, Loader2, ScanSearch } from "lucide-react";
 import { api } from "../api.js";
 import CameraCard from "./CameraCard.jsx";
 import VideoAnalyzer from "./VideoAnalyzer.jsx";
+import ZoneEditor from "./ZoneEditor.jsx";
 
 const FILTERS = ["All", "Live", "Clear", "Alerts"];
 
@@ -17,6 +18,7 @@ function matchesFilter(camera, filter) {
 export default function CamerasPage({ cameras, loading, onRefresh, blurFaces = false }) {
   const [filter, setFilter] = useState("All");
   const [scanning, setScanning] = useState(false);
+  const [zoneCameraId, setZoneCameraId] = useState(null); // set = "Edit zones" mode for that camera
 
   async function rescan() {
     setScanning(true);
@@ -39,15 +41,41 @@ export default function CamerasPage({ cameras, loading, onRefresh, blurFaces = f
               All {cameras.length} connected feeds, analysed by the PPE detection model.
             </p>
           </div>
-          <button
-            onClick={rescan}
-            disabled={scanning}
-            className="flex items-center gap-1.5 rounded-lg bg-cyan-accent text-base-950 font-medium px-3 py-2 text-xs hover:bg-cyan-accent/90 transition-colors disabled:opacity-60"
-          >
-            {scanning ? <Loader2 size={13} className="animate-spin" /> : <ScanSearch size={13} />}
-            {scanning ? "Scanning..." : "Re-scan all cameras"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setZoneCameraId(zoneCameraId ? null : cameras[0]?.id)}
+              disabled={!cameras.length}
+              aria-pressed={Boolean(zoneCameraId)}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors disabled:opacity-60 ${
+                zoneCameraId
+                  ? "border-alert-critical/40 bg-alert-critical/10 text-alert-critical"
+                  : "border-base-700/60 bg-base-850 text-slate-300 hover:text-slate-100"
+              }`}
+            >
+              <Hexagon size={13} /> {zoneCameraId ? "Done editing zones" : "Edit zones"}
+            </button>
+            <button
+              onClick={rescan}
+              disabled={scanning}
+              className="flex items-center gap-1.5 rounded-lg bg-cyan-accent text-base-950 font-medium px-3 py-2 text-xs hover:bg-cyan-accent/90 transition-colors disabled:opacity-60"
+            >
+              {scanning ? <Loader2 size={13} className="animate-spin" /> : <ScanSearch size={13} />}
+              {scanning ? "Scanning..." : "Re-scan all cameras"}
+            </button>
+          </div>
         </div>
+
+        {zoneCameraId && cameras.length > 0 && (
+          <div className="mt-3">
+            <ZoneEditor
+              cameras={cameras}
+              cameraId={zoneCameraId}
+              onCameraChange={setZoneCameraId}
+              onSaved={onRefresh}
+              onClose={() => setZoneCameraId(null)}
+            />
+          </div>
+        )}
 
         <div className="flex items-center gap-1.5 mt-3 mb-3">
           {FILTERS.map((f) => (
@@ -77,9 +105,30 @@ export default function CamerasPage({ cameras, loading, onRefresh, blurFaces = f
           </p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filtered.map((camera) => (
-              <CameraCard key={camera.id} camera={camera} blurFaces={blurFaces} onRestore={onRefresh} />
-            ))}
+            {filtered.map((camera) =>
+              zoneCameraId ? (
+                // in zone-editing mode a click on a tile picks the camera to edit
+                // (a div, not a <button>: the card itself contains a button)
+                <div
+                  key={camera.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setZoneCameraId(camera.id)}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setZoneCameraId(camera.id)}
+                  aria-label={`Edit zones of ${camera.name}`}
+                  aria-pressed={camera.id === zoneCameraId}
+                  className={`cursor-pointer rounded-xl transition-shadow outline-none focus-visible:ring-2 focus-visible:ring-cyan-accent ${
+                    camera.id === zoneCameraId ? "ring-2 ring-alert-critical" : "hover:ring-2 hover:ring-base-600"
+                  }`}
+                >
+                  <div className="pointer-events-none">
+                    <CameraCard camera={camera} blurFaces={blurFaces} />
+                  </div>
+                </div>
+              ) : (
+                <CameraCard key={camera.id} camera={camera} blurFaces={blurFaces} onRestore={onRefresh} />
+              )
+            )}
           </div>
         )}
       </div>

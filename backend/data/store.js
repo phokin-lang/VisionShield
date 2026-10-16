@@ -10,6 +10,7 @@
 //   camera_sources  the uploaded JPEG shown on a camera tile
 //   state           { _id: "settings" } and { _id: "alerts", items: [...] }
 import { getDb, persist } from "./db.js";
+import { RULE_DEFAULTS } from "../services/detector.js";
 
 const CAMERA_DEFS = [
   { id: "cam-01", name: "North Entrance", zone: "Building A · Ground Floor", image: "ppe/cam1.jpg" },
@@ -36,7 +37,9 @@ let cameras = CAMERA_DEFS.map((d) => ({
   faces: [],
   sourceLabel: null,
   sourceVersion: null,
-  detections: []
+  detections: [],
+  objects: [], // vehicles / phones seen in the last frame (drawn, but not violations by themselves)
+  zones: [] // danger zones drawn by the user: [{ id, name, points: [[x%, y%], ...] }]
 }));
 
 // Media a user chose to show on a camera tile (instead of the default frame).
@@ -48,8 +51,7 @@ let seq = 0;
 const nextId = (p) => `${p}${Date.now().toString(36)}${(seq++).toString(36)}`;
 
 let settings = {
-  hardhat: true,
-  vest: true,
+  ...RULE_DEFAULTS, // detection rules + thresholds (hardhat, vest, danger_zone, ..., crowd_max)
   line: false, // LINE push notifications (needs LINE_CHANNEL_ACCESS_TOKEN + LINE_TO on the server)
   blur: false // blur worker faces in the UI
 };
@@ -124,10 +126,11 @@ export function listAlerts(filter = "all") {
   return alerts.filter((a) => a.severity === filter);
 }
 
-function pushAlert(camera, { label, severity }, source, acknowledged = false) {
+function pushAlert(camera, { label, severity, rule }, source, acknowledged = false) {
   alerts.unshift({
     id: nextId("a"),
     title: label,
+    rule: rule || null,
     location: `${camera.name} · ${camera.id}`,
     severity,
     time: nowTime(),
@@ -140,7 +143,7 @@ function pushAlert(camera, { label, severity }, source, acknowledged = false) {
 }
 
 /** Store the result of running the model on a camera frame. */
-export function applyScan(cameraId, { violations, summary, faces, imageWidth, imageHeight, source = "scan" }) {
+export function applyScan(cameraId, { violations, summary, faces, objects, imageWidth, imageHeight, source = "scan" }) {
   const camera = getCamera(cameraId);
   if (!camera) return null;
 
@@ -156,6 +159,7 @@ export function applyScan(cameraId, { violations, summary, faces, imageWidth, im
   camera.scanned = true;
   camera.people = summary?.people ?? 0;
   camera.faces = faces || [];
+  camera.objects = (objects || []).map(({ label, confidence, box }) => ({ label, confidence, box }));
   if (imageWidth) camera.imageWidth = imageWidth;
   if (imageHeight) camera.imageHeight = imageHeight;
 
@@ -201,11 +205,13 @@ export function getStats() {
   const acknowledged = alerts.filter((a) => a.acknowledged).length;
 
   // compliance = share of detected people with NO violation, across all frames
+  // (Overcrowding boxes cover a whole zone, not one person, so they don't count here)
   let people = 0;
   let violating = 0;
   for (const c of cameras) {
     people += c.people || 0;
-    const boxes = new Set(c.detections.filter((d) => d.box).map((d) => `${d.box.x},${d.box.y},${d.box.w},${d.box.h}`));
+    const personBoxes = c.detections.filter((d) => d.box && d.rule !== "crowding");
+    const boxes = new Set(personBoxes.map((d) => `${d.box.x},${d.box.y},${d.box.w},${d.box.h}`));
     violating += boxes.size;
   }
   const complianceRate = people > 0 ? Math.max(0, Math.round((1 - violating / people) * 1000) / 10) : 100;
@@ -226,6 +232,15 @@ export function updateSettings(patch) {
   settings = { ...settings, ...patch };
   saveSettings();
   return settings;
+}
+
+/** Replace a camera's danger zones (already validated by the route). */
+export function setCameraZones(cameraId, zones) {
+  const camera = getCamera(cameraId);
+  if (!camera) return null;
+  camera.zones = zones;
+  saveCamera(camera);
+  return camera;
 }
 
 export function setCameraSource(cameraId, jpeg, label) {

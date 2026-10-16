@@ -65,6 +65,8 @@ export const api = {
     request("/settings", { method: "PUT", body: JSON.stringify(patch) }),
   scanCameras: () => request("/cameras/scan", { method: "POST" }),
   restoreCamera: (id) => request(`/cameras/${id}/source`, { method: "DELETE" }),
+  saveZones: (id, zones) =>
+    request(`/cameras/${id}/zones`, { method: "PUT", body: JSON.stringify({ zones }) }),
   // custom frame shown on a camera tile (needs the auth header, so fetch -> blob)
   getCameraSource: async (id) => {
     const token = localStorage.getItem("token");
@@ -84,6 +86,9 @@ export const api = {
     if (cameraId) {
       form.append("cameraId", cameraId);
       if (opts.sourceLabel) form.append("sourceLabel", opts.sourceLabel);
+    } else if (opts.zoneCameraId) {
+      // analyse with that camera's danger zones without logging the result to it
+      form.append("zoneCameraId", opts.zoneCameraId);
     }
     const res = await fetch(`${BASE}/detect`, {
       method: "POST",

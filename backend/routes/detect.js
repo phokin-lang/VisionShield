@@ -3,6 +3,7 @@ import multer from "multer";
 import { detect, status, BusyError } from "../services/detector.js";
 import sharp from "sharp";
 import { applyScan, setCameraSource, getCamera, getSettings } from "../data/store.js";
+import { objectsOf } from "../services/cameraScanner.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 
 const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 8);
@@ -30,8 +31,10 @@ function singleUpload(req, res, next) {
   });
 }
 
-// POST /api/detect  (multipart: image, optional cameraId)
-// Runs the PPE model (Hard_hat, Vest) + person detector and returns
+// POST /api/detect  (multipart: image, optional cameraId, optional zoneCameraId)
+//   cameraId      log the result to that camera (its tile shows this image)
+//   zoneCameraId  only use that camera's danger zones (video analysis frames)
+// Runs the PPE model (Hard_hat, Vest) + COCO detector and returns
 // { raw_detections, violations, summary, meta }.
 router.post("/", rateLimit({ windowMs: 60_000, max: Number(process.env.DETECT_RATE_PER_MIN || 180), name: "detect" }), singleUpload, async (req, res) => {
   if (!req.file) {
@@ -42,10 +45,10 @@ router.post("/", rateLimit({ windowMs: 60_000, max: Number(process.env.DETECT_RA
   if (cameraId && !getCamera(cameraId)) {
     return res.status(404).json({ error: "Camera not found" });
   }
+  const zoneCamera = getCamera(cameraId || req.body?.zoneCameraId);
 
-  const s = getSettings();
   try {
-    const result = await detect(req.file.buffer, { hardhat: s.hardhat, vest: s.vest });
+    const result = await detect(req.file.buffer, getSettings(), { zones: zoneCamera?.zones });
 
     // "Log violations to <camera>": the uploaded image / best video frame REPLACES that camera's
     // feed on the dashboard and Live cameras, together with its detections and alerts.
@@ -61,6 +64,7 @@ router.post("/", rateLimit({ windowMs: 60_000, max: Number(process.env.DETECT_RA
         violations: result.violations,
         summary: result.summary,
         faces: result.faces,
+        objects: objectsOf(result.raw_detections),
         imageWidth: info.width,
         imageHeight: info.height,
         source: "upload"

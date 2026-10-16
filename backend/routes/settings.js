@@ -4,7 +4,16 @@ import { scanAllCameras } from "../services/cameraScanner.js";
 import { lineConfigured, pushLine } from "../services/line.js";
 
 const router = Router();
-const ALLOWED = ["hardhat", "vest", "line", "blur"];
+const ALLOWED = ["hardhat", "vest", "line", "blur", "danger_zone", "vehicle_proximity", "fall", "crowding", "phone_use"];
+// numeric thresholds: [min, max, integer?]
+const NUMERIC = {
+  proximity_ratio: [0.1, 3, false],
+  crowd_max: [1, 100, true],
+  fall_ratio: [1, 4, false],
+  fall_min_height: [1, 50, false]
+};
+// changing any of these re-evaluates the camera frames
+const RULE_KEYS = [...ALLOWED.filter((k) => k !== "line" && k !== "blur"), ...Object.keys(NUMERIC)];
 
 const view = (s) => ({ ...s, lineConfigured: lineConfigured() });
 
@@ -16,14 +25,23 @@ router.get("/", (req, res) => {
 // PUT /api/settings — persist a settings change from the Settings page
 router.put("/", (req, res) => {
   const patch = req.body || {};
-  const clean = Object.fromEntries(
-    Object.entries(patch).filter(([k, v]) => ALLOWED.includes(k) && typeof v === "boolean")
-  );
+  const clean = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (ALLOWED.includes(k) && typeof v === "boolean") clean[k] = v;
+    if (NUMERIC[k]) {
+      const [min, max, int] = NUMERIC[k];
+      const n = Number(v);
+      if (typeof v === "boolean" || v === null || v === "" || !Number.isFinite(n) || n < min || n > max || (int && !Number.isInteger(n))) {
+        return res.status(400).json({ error: `${k} must be ${int ? "a whole number" : "a number"} between ${min} and ${max}` });
+      }
+      clean[k] = n;
+    }
+  }
   const before = getSettings();
   const saved = updateSettings(clean);
 
   // detection rules changed -> re-evaluate the camera frames in the background
-  if (saved.hardhat !== before.hardhat || saved.vest !== before.vest) {
+  if (RULE_KEYS.some((k) => saved[k] !== before[k])) {
     scanAllCameras().catch((e) => console.error("[settings] rescan failed:", e.message));
   }
   res.json(view(saved));

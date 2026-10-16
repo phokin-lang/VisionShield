@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { RotateCcw, Paperclip } from "lucide-react";
 import { api } from "../api.js";
 import DetectionImage from "./DetectionImage.jsx";
+import useCameraSrc from "./useCameraSrc.js";
+import { ZoneShapes, VehicleBoxes } from "./ZoneLayer.jsx";
 
 const SEVERITY_STYLES = {
   critical: { border: "border-alert-critical", text: "text-alert-critical", bg: "bg-alert-critical" },
@@ -10,32 +12,10 @@ const SEVERITY_STYLES = {
   low: { border: "border-alert-low", text: "text-alert-low", bg: "bg-alert-low" }
 };
 
-const BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
-
 export default function CameraCard({ camera, blurFaces = false, onRestore }) {
   // A user-uploaded image / video frame can replace the default feed ("Log violations to...")
-  const [customUrl, setCustomUrl] = useState(null);
+  const src = useCameraSrc(camera);
   const [restoring, setRestoring] = useState(false);
-  useEffect(() => {
-    if (!camera.sourceVersion) {
-      setCustomUrl(null);
-      return;
-    }
-    let cancelled = false;
-    let url = null;
-    api
-      .getCameraSource(camera.id)
-      .then((blob) => {
-        if (cancelled) return;
-        url = URL.createObjectURL(blob);
-        setCustomUrl(url);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [camera.id, camera.sourceVersion]);
 
   async function restore() {
     setRestoring(true);
@@ -53,7 +33,7 @@ export default function CameraCard({ camera, blurFaces = false, onRestore }) {
   return (
     <div className="group relative rounded-xl overflow-hidden border border-base-700/60 bg-base-900">
       <DetectionImage
-        src={camera.sourceVersion ? customUrl || BLANK : `/cameras/${camera.image}`}
+        src={src}
         alt={camera.name}
         width={camera.imageWidth}
         height={camera.imageHeight}
@@ -89,6 +69,10 @@ export default function CameraCard({ camera, blurFaces = false, onRestore }) {
               style={{ left: `${f.x}%`, top: `${f.y}%`, width: `${f.w}%`, height: `${f.h}%` }}
             />
           ))}
+
+        {/* danger zones (translucent red) and vehicles (orange) under the violation boxes */}
+        <ZoneShapes zones={camera.zones} />
+        <VehicleBoxes objects={camera.objects} />
 
         {/* Detection bounding boxes (drawn in the image's own coordinate space) */}
         {camera.detections.map((d, idx) => {

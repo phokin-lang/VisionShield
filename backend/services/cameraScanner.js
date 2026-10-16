@@ -2,8 +2,11 @@ import fs from "fs/promises";
 import path from "path";
 import sharp from "sharp";
 import { fileURLToPath } from "url";
-import { detect, status as detectorStatus } from "./detector.js";
-import { cameraDefs, applyScan, getSettings, getCameraSource } from "../data/store.js";
+import { detect, status as detectorStatus, VEHICLE_LABELS } from "./detector.js";
+import { cameraDefs, applyScan, getSettings, getCameraSource, getCamera } from "../data/store.js";
+
+// non-violation objects worth drawing on the camera tile
+export const objectsOf = (raw) => raw.filter((d) => VEHICLE_LABELS.includes(d.label) || d.label === "Cell_phone");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = path.join(__dirname, "..", "assets", "cameras");
@@ -15,12 +18,12 @@ async function scanOne(def) {
   const custom = getCameraSource(def.id);
   const buf = custom ? custom.jpeg : await fs.readFile(path.join(ASSETS, path.basename(def.image)));
   const meta = await sharp(buf).metadata();
-  const s = getSettings();
-  const result = await detect(buf, { hardhat: s.hardhat, vest: s.vest });
+  const result = await detect(buf, getSettings(), { zones: getCamera(def.id)?.zones });
   applyScan(def.id, {
     violations: result.violations,
     summary: result.summary,
     faces: result.faces,
+    objects: objectsOf(result.raw_detections),
     imageWidth: meta.width,
     imageHeight: meta.height,
     source: custom ? "upload" : "scan"

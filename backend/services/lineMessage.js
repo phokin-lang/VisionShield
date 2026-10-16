@@ -1,9 +1,17 @@
-// Builds the Thai LINE message for a PPE alert.
+// Builds the Thai LINE message for a PPE / hazard alert.
 
 const LABEL_TH = {
   "No Hard Hat Detected": "ไม่สวมหมวกนิรภัย",
-  "No Safety Vest Detected": "ไม่สวมเสื้อสะท้อนแสง"
+  "No Safety Vest Detected": "ไม่สวมเสื้อสะท้อนแสง",
+  "Person in Danger Zone": "มีคนเข้าเขตอันตราย",
+  "Person Near Vehicle": "คนอยู่ใกล้ยานพาหนะ",
+  "Possible Fall": "อาจมีคนล้ม",
+  "Overcrowding": "คนแออัดในโซน",
+  "Phone Use in Work Area": "ใช้โทรศัพท์ในพื้นที่ทำงาน"
 };
+const PPE_LABELS = ["No Hard Hat Detected", "No Safety Vest Detected"];
+// how the count is read: zones for Overcrowding, people for everything else
+const UNIT_TH = { Overcrowding: "โซน" };
 
 const clip = (v, n) => String(v ?? "").trim().slice(0, n);
 
@@ -22,7 +30,10 @@ export function thaiTime(date = new Date()) {
 
 export function buildLineMessage(body = {}) {
   const { camera, file, kind, firstSeen, uploadedAt, violations, flaggedFrames, totalFrames, title, detail } = body;
-  const lines = ["🚨 VisionShield แจ้งเตือน", "พบการฝ่าฝืนอุปกรณ์ความปลอดภัย", ""];
+  const list = Array.isArray(violations) ? violations.slice(0, 10) : [];
+  const ppeOnly = list.length > 0 && list.every((v) => PPE_LABELS.includes(v.label));
+  const headline = ppeOnly || !list.length ? "พบการฝ่าฝืนอุปกรณ์ความปลอดภัย" : "พบเหตุการณ์ไม่ปลอดภัยในพื้นที่ทำงาน";
+  const lines = ["🚨 VisionShield แจ้งเตือน", headline, ""];
 
   const place = camera?.name
     ? `${clip(camera.name, 80)}${camera.zone ? ` (${clip(camera.zone, 80)})` : ""}`
@@ -39,13 +50,12 @@ export function buildLineMessage(body = {}) {
     lines.push(`🎥 ที่มา: ${type} ${clip(file, 100)}${seen}`);
   }
 
-  const list = Array.isArray(violations) ? violations.slice(0, 10) : [];
   if (list.length) {
     lines.push("", "ตรวจพบ:");
     for (const v of list) {
       const label = LABEL_TH[v.label] || clip(v.label, 80);
       const n = Number(v.count);
-      lines.push(`• ${label}${n > 0 ? ` ${n} คน` : ""}`);
+      lines.push(`• ${label}${n > 0 ? ` ${n} ${UNIT_TH[v.label] || "คน"}` : ""}`);
     }
   } else if (title || detail) {
     // older clients that only send free text

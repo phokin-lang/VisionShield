@@ -7,9 +7,24 @@ const MAX_SAMPLES = 90; // frames analysed per video
 const MAX_SIDE = 960; // frames are downscaled before upload
 const SEVERITY_STYLES = {
   critical: { border: "border-alert-critical", bg: "bg-alert-critical" },
+  high: { border: "border-alert-high", bg: "bg-alert-high" },
   medium: { border: "border-alert-high", bg: "bg-alert-high" }
 };
-const LABEL_COLORS = { Person: "#94a3b8", Hard_hat: "#3ee6c4", Vest: "#a3e635" };
+const VEHICLE = "#f97316";
+const LABEL_COLORS = {
+  Person: "#94a3b8",
+  Hard_hat: "#3ee6c4",
+  Vest: "#a3e635",
+  Bicycle: VEHICLE,
+  Car: VEHICLE,
+  Motorcycle: VEHICLE,
+  Bus: VEHICLE,
+  Truck: VEHICLE,
+  Cell_phone: "#c084fc"
+};
+// hazard rules always go to LINE; PPE rules only when critical (no hard hat)
+const HAZARD_RULES = ["danger_zone", "vehicle_proximity", "fall", "crowding", "phone_use"];
+const notifiable = (v) => v.severity === "critical" || HAZARD_RULES.includes(v.rule);
 
 const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -96,7 +111,8 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
       try {
         return await api.analyzeImage(blob, opts.cameraId, {
           skipDownscale: opts.skipDownscale ?? true,
-          sourceLabel: opts.label
+          sourceLabel: opts.label,
+          zoneCameraId: cameraId || undefined
         });
       } catch (err) {
         if (/busy|many requests/i.test(err.message) && attempt < 3) {
@@ -186,7 +202,7 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
       setStatus("done");
 
       // ---- after-analysis actions (best effort, never fail the analysis) ----
-      const critical = results.flatMap((s) => s.violations || []).filter((x) => x.severity === "critical");
+      const critical = results.flatMap((s) => s.violations || []).filter(notifiable);
       const flagged = results.filter((s) => s.violations?.length);
       // "Log violations to <camera>": send the best frame again with the camera id. The server
       // stores it as that camera's feed, so the dashboard + Live cameras show it with its boxes.
@@ -209,7 +225,7 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
       }
       if (critical.length) {
         try {
-          const first = results.find((s) => s.violations?.some((x) => x.severity === "critical"));
+          const first = results.find((s) => s.violations?.some(notifiable));
           // most people seen with each violation in any single frame (avoids counting the same person per frame)
           const maxPerLabel = {};
           for (const smp of results) {

@@ -2,10 +2,12 @@
 //
 // Two YOLOv8-nano ONNX models run back-to-back on ONE shared 640x640 tensor:
 //   1. ppe_hat_vest_nano.onnx  — the friend-trained PPE model  (Hard_hat, Vest)
-//   2. person_yolov8n.onnx     — stock COCO YOLOv8n, class 0 only (Person)
+//   2. person_yolov8n.onnx     — stock COCO YOLOv8n: Person + vehicles + cell phone
 //   3. face_scrfd_500m.onnx    — SCRFD-500M face detector (2.5 MB), only used for the
 //                                "blur worker faces" privacy setting
 // A person with no Hard_hat / Vest on their body => compliance violation.
+// Hazard rules (danger zone, vehicle proximity, fall, crowding, phone use) reuse the
+// same model outputs — no extra model is loaded for them.
 //
 // Memory design (Render 512 MB):
 //   * onnxruntime-node (CPU only), 1 thread, memory arena + mem-pattern OFF
@@ -27,9 +29,16 @@ const SIZE = 640;
 const PPE_CLASSES = ["Hard_hat", "Vest"]; // must match data.yaml of the trained model
 const PAD = 114 / 255;
 
+// COCO classes decoded from person_yolov8n.onnx (index -> label)
+const COCO = { 0: "Person", 1: "Bicycle", 2: "Car", 3: "Motorcycle", 5: "Bus", 7: "Truck", 67: "Cell_phone" };
+const COCO_IDS = Object.keys(COCO).map(Number);
+export const VEHICLE_LABELS = ["Bicycle", "Car", "Motorcycle", "Bus", "Truck"];
+const TWO_WHEELERS = ["Bicycle", "Motorcycle"];
+
 export const CONFIG = {
   ppeConf: Number(process.env.PPE_CONF || 0.5),
   personConf: Number(process.env.PERSON_CONF || 0.4),
+  objectConf: Number(process.env.OBJECT_CONF || 0.35), // vehicles + cell phone
   faceConf: Number(process.env.FACE_CONF || 0.45),
   iou: Number(process.env.NMS_IOU || 0.6),
   maxQueue: Number(process.env.MAX_INFERENCE_QUEUE || 4),
@@ -220,23 +229,139 @@ function wearsVest(person, vests) {
   });
 }
 
-function evaluate(detections, checks) {
+// Rule switches + thresholds; every key can be changed from Settings (data/store.js).
+export const RULE_DEFAULTS = {
+  hardhat: true,
+  vest: true,
+  danger_zone: true,
+  vehicle_proximity: true,
+  fall: true,
+  crowding: true,
+  phone_use: true,
+  proximity_ratio: 0.5, // person-vehicle gap < ratio x person height
+  crowd_max: 5, // more people than this in one zone -> Overcrowding
+  fall_ratio: 1.3, // person box width / height (in pixels) above this -> Possible Fall
+  fall_min_height: 8 // ...and the box is at least this % of the frame tall
+};
+
+// Ray casting; zone points and the test point are both in % of the frame.
+function inPolygon(x, y, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i];
+    const [xj, yj] = pts[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// where a person stands: bottom-centre of their box
+const footPoint = (b) => [b.x + b.w / 2, b.y + b.h];
+
+// Smallest gap between two boxes in pixels (0 if they overlap).
+function gapPx(a, b, geo) {
+  const dx = Math.max(0, a.x - (b.x + b.w), b.x - (a.x + a.w)) * (geo.nw / 100);
+  const dy = Math.max(0, a.y - (b.y + b.h), b.y - (a.y + a.h)) * (geo.nh / 100);
+  return Math.hypot(dx, dy);
+}
+
+function overlapArea(a, b) {
+  const w = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+  const h = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  return w * h;
+}
+
+function zoneBox(points) {
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+export function evaluate(detections, rules, zones, geo) {
   const people = detections.filter((d) => d.label === "Person");
   const hats = detections.filter((d) => d.label === "Hard_hat");
   const vests = detections.filter((d) => d.label === "Vest");
+  const vehicles = detections.filter((d) => VEHICLE_LABELS.includes(d.label));
+  const phones = detections.filter((d) => d.label === "Cell_phone");
 
   const violations = [];
   for (const person of people) {
     // ignore tiny background people — too small for PPE to be judged reliably
     if (person.box.h < 8 || person.box.w < 2) continue;
-    if (checks.hardhat && !wearsHat(person, hats)) {
-      violations.push({ label: "No Hard Hat Detected", severity: "critical", box: person.box });
+    if (rules.hardhat && !wearsHat(person, hats)) {
+      violations.push({ rule: "hardhat", label: "No Hard Hat Detected", severity: "critical", box: person.box });
     }
-    if (checks.vest && !wearsVest(person, vests)) {
-      violations.push({ label: "No Safety Vest Detected", severity: "medium", box: person.box });
+    if (rules.vest && !wearsVest(person, vests)) {
+      violations.push({ rule: "vest", label: "No Safety Vest Detected", severity: "medium", box: person.box });
     }
   }
-  return { people: people.length, hats: hats.length, vests: vests.length, violations };
+
+  // hazard rules also look at smaller people, just not at single-pixel noise
+  const visible = people.filter((p) => p.box.h >= 3 && p.box.w >= 1);
+
+  for (const person of visible) {
+    const p = person.box;
+    const [fx, fy] = footPoint(p);
+
+    if (rules.danger_zone) {
+      const zone = zones.find((z) => inPolygon(fx, fy, z.points));
+      if (zone) {
+        violations.push({ rule: "danger_zone", label: "Person in Danger Zone", severity: "critical", box: p, zone: zone.name });
+      }
+    }
+
+    if (rules.vehicle_proximity && vehicles.length) {
+      let nearest = null;
+      let best = Infinity;
+      for (const v of vehicles) {
+        // a rider covers most of their bicycle/motorcycle: that's not "near a vehicle"
+        if (TWO_WHEELERS.includes(v.label) && overlapArea(p, v.box) >= 0.4 * v.box.w * v.box.h) continue;
+        const d = gapPx(p, v.box, geo);
+        if (d < best) {
+          best = d;
+          nearest = v;
+        }
+      }
+      if (nearest && best < rules.proximity_ratio * p.h * (geo.nh / 100)) {
+        violations.push({ rule: "vehicle_proximity", label: "Person Near Vehicle", severity: "high", box: p, vehicle: nearest.label });
+      }
+    }
+
+    if (rules.fall) {
+      const ratioPx = (p.w * geo.nw) / (p.h * geo.nh);
+      if (ratioPx > rules.fall_ratio && p.h >= rules.fall_min_height) {
+        violations.push({ rule: "fall", label: "Possible Fall", severity: "high", box: p });
+      }
+    }
+
+    if (rules.phone_use) {
+      const holding = phones.some((ph) => {
+        const { cx, cy } = center(ph.box);
+        return cx >= p.x && cx <= p.x + p.w && cy >= p.y && cy <= p.y + p.h;
+      });
+      if (holding) violations.push({ rule: "phone_use", label: "Phone Use in Work Area", severity: "medium", box: p });
+    }
+  }
+
+  if (rules.crowding) {
+    for (const zone of zones) {
+      const n = visible.filter((person) => inPolygon(...footPoint(person.box), zone.points)).length;
+      if (n > rules.crowd_max) {
+        violations.push({ rule: "crowding", label: "Overcrowding", severity: "medium", box: zoneBox(zone.points), zone: zone.name, count: n });
+      }
+    }
+  }
+
+  return {
+    people: people.length,
+    hats: hats.length,
+    vests: vests.length,
+    vehicles: vehicles.length,
+    phones: phones.length,
+    violations
+  };
 }
 
 // ---------- SCRFD face detector ----------
@@ -416,23 +541,36 @@ export function status() {
       person: "person_yolov8n.onnx",
       face: faceSession ? "face_scrfd_500m.onnx" : null
     },
-    classes: ["Person", ...PPE_CLASSES],
-    config: { ppeConf: CONFIG.ppeConf, personConf: CONFIG.personConf, iou: CONFIG.iou }
+    classes: [...Object.values(COCO), ...PPE_CLASSES],
+    config: { ppeConf: CONFIG.ppeConf, personConf: CONFIG.personConf, objectConf: CONFIG.objectConf, iou: CONFIG.iou }
   };
 }
 
+/** Merge saved settings over the defaults: switches are on unless false, bad numbers fall back. */
+export function resolveRules(settings = {}) {
+  const rules = {};
+  for (const [k, def] of Object.entries(RULE_DEFAULTS)) {
+    const v = settings[k];
+    if (typeof def === "boolean") rules[k] = v !== false;
+    else rules[k] = typeof v === "number" && Number.isFinite(v) ? v : def;
+  }
+  return rules;
+}
+
 /**
- * Run PPE detection on an encoded image (jpeg/png/webp/...).
+ * Run PPE + hazard detection on an encoded image (jpeg/png/webp/...).
  * @param {Buffer} buffer
- * @param {{hardhat?: boolean, vest?: boolean}} checks which rules to enforce
+ * @param {object} settings rule switches/thresholds (see RULE_DEFAULTS); missing keys use defaults
+ * @param {{zones?: {name: string, points: number[][]}[]}} opts the camera's zones, in % of the frame
  */
-export function detect(buffer, checks = {}) {
+export function detect(buffer, settings = {}, { zones = [] } = {}) {
   if (!ready) {
     const e = new Error("Model not loaded");
     e.code = "NOT_READY";
     return Promise.reject(e);
   }
-  const rules = { hardhat: checks.hardhat !== false, vest: checks.vest !== false };
+  const rules = resolveRules(settings);
+  const validZones = (zones || []).filter((z) => Array.isArray(z.points) && z.points.length >= 3);
 
   return enqueue(async () => {
     const t0 = Date.now();
@@ -449,15 +587,14 @@ export function detect(buffer, checks = {}) {
     ppeOut.dispose?.();
 
     const personOut = (await personSession.run({ [inputName.person]: tensor }))[personSession.outputNames[0]];
-    const personDets = decode(personOut, 80, [0], CONFIG.personConf, geo).map((d) => ({
-      label: "Person",
-      confidence: d.confidence,
-      box: d.box
-    }));
+    const minConf = Math.min(CONFIG.personConf, CONFIG.objectConf);
+    const cocoDets = decode(personOut, 80, COCO_IDS, minConf, geo)
+      .filter((d) => d.confidence >= (d.cls === 0 ? CONFIG.personConf : CONFIG.objectConf))
+      .map((d) => ({ label: COCO[d.cls], confidence: d.confidence, box: d.box }));
     personOut.dispose?.();
 
-    const raw = [...personDets, ...ppeDets];
-    const summary = evaluate(raw, rules);
+    const raw = [...cocoDets, ...ppeDets];
+    const summary = evaluate(raw, rules, validZones, geo);
 
     // real face boxes (SCRFD) for the privacy blur; heuristic head boxes only as a fallback
     let faces;
@@ -473,7 +610,13 @@ export function detect(buffer, checks = {}) {
       raw_detections: raw,
       violations: summary.violations,
       faces,
-      summary: { people: summary.people, hard_hats: summary.hats, vests: summary.vests },
+      summary: {
+        people: summary.people,
+        hard_hats: summary.hats,
+        vests: summary.vests,
+        vehicles: summary.vehicles,
+        phones: summary.phones
+      },
       meta: {
         inference_ms: Date.now() - tInf,
         total_ms: Date.now() - t0,

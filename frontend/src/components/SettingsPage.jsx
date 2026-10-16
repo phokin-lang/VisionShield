@@ -6,9 +6,70 @@ import { applyTheme, getStoredTheme } from "../theme.js";
 const TOGGLES = [
   { id: "hardhat", label: "Hard hat detection", desc: "Flag workers without head protection." },
   { id: "vest", label: "Safety vest detection", desc: "Flag workers without high-visibility vests." },
-  { id: "line", label: "LINE notifications", desc: "Send a LINE message when a critical violation is found in an analysed video or photo." },
+  { id: "line", label: "LINE notifications", desc: "Send a LINE message when an analysed video or photo shows a missing hard hat or any hazard rule below (same cooldown)." },
   { id: "blur", label: "Blur worker faces", desc: "Blur the head area of detected people in camera feeds and video analysis, for privacy." }
 ];
+
+// Hazard rules: same people/vehicle detector, no extra model. `fields` = adjustable thresholds.
+const HAZARDS = [
+  {
+    id: "danger_zone",
+    label: "Danger zones",
+    desc: "Critical alert when someone's feet are inside a zone drawn on Live cameras → Edit zones."
+  },
+  {
+    id: "vehicle_proximity",
+    label: "Person near vehicle",
+    desc: "Alert when a person is close to a car, truck, bus, motorcycle or bicycle (riders are ignored).",
+    fields: [{ id: "proximity_ratio", label: "Closer than", unit: "× the person's height", min: 0.1, max: 3, step: 0.1 }]
+  },
+  {
+    id: "fall",
+    label: "Possible fall",
+    desc: "Alert when a person's box is much wider than tall, like someone lying on the ground.",
+    fields: [
+      { id: "fall_ratio", label: "Width / height above", unit: "", min: 1, max: 4, step: 0.1 },
+      { id: "fall_min_height", label: "Box at least", unit: "% of the frame tall", min: 1, max: 50, step: 1 }
+    ]
+  },
+  {
+    id: "crowding",
+    label: "Overcrowding",
+    desc: "Alert when too many people stand inside one danger zone.",
+    fields: [{ id: "crowd_max", label: "More than", unit: "people in a zone", min: 1, max: 100, step: 1 }]
+  },
+  { id: "phone_use", label: "Phone use in work area", desc: "Alert when a mobile phone is detected in a person's hands." }
+];
+
+// Number input that saves on blur / Enter (not on every keystroke, which would re-scan each time).
+function NumberField({ field, value, disabled, onCommit }) {
+  const [text, setText] = useState(String(value ?? ""));
+  useEffect(() => setText(String(value ?? "")), [value]);
+  const commit = async () => {
+    const n = Number(text);
+    if (text.trim() === "" || !Number.isFinite(n) || n === value) return setText(String(value ?? ""));
+    if (!(await onCommit(n))) setText(String(value ?? "")); // rejected by the server: show the stored value
+  };
+  return (
+    <label className="flex items-center gap-2 text-xs text-slate-400">
+      {field.label}
+      <input
+        type="number"
+        inputMode="decimal"
+        min={field.min}
+        max={field.max}
+        step={field.step}
+        value={text}
+        disabled={disabled}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        className="w-20 rounded-md border border-base-700/60 bg-base-850 px-2 py-1 text-slate-200 disabled:opacity-50"
+      />
+      {field.unit && <span className="text-slate-500">{field.unit}</span>}
+    </label>
+  );
+}
 
 function Toggle({ checked, onChange, disabled, label }) {
   return (
@@ -71,6 +132,23 @@ export default function SettingsPage({ onChange }) {
       setState(reverted);
       onChange?.(reverted);
       setError(err.message || "Could not save setting.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function saveNumber(id, value) {
+    setSavingId(id);
+    setError(null);
+    try {
+      const saved = await api.updateSettings({ [id]: value });
+      setState(saved);
+      onChange?.(saved);
+      setSavedAt(new Date());
+      return true;
+    } catch (err) {
+      setError(err.message || "Could not save setting.");
+      return false;
     } finally {
       setSavingId(null);
     }
@@ -167,6 +245,38 @@ export default function SettingsPage({ onChange }) {
                 )}
                 {lineTest === "ok" && <p className="text-safe mt-1.5">Test message sent — check LINE.</p>}
                 {lineTest === "fail" && <p className="text-alert-critical mt-1.5">LINE rejected the message. Check the token and the user/group ID.</p>}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <h2 className="mt-6 mb-2 text-sm font-medium text-slate-300">Hazard rules</h2>
+      <div className="rounded-xl border border-base-700/60 bg-base-900 divide-y divide-base-700/50 max-w-2xl">
+        {HAZARDS.map((t) => (
+          <div key={t.id} className="px-5 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-slate-200">{t.label}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{t.desc}</p>
+              </div>
+              {!state ? (
+                <div className="h-6 w-11 rounded-full bg-base-800 animate-pulse" />
+              ) : (
+                <div className="flex items-center gap-2">
+                  {savingId === t.id && <Loader2 size={12} className="animate-spin text-slate-500" />}
+                  <Toggle label={t.label} checked={state[t.id] !== false} onChange={() => toggle(t.id)} disabled={savingId === t.id} />
+                </div>
+              )}
+            </div>
+            {state && t.fields && state[t.id] !== false && (
+              <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+                {t.fields.map((f) => (
+                  <div key={f.id} className="flex items-center gap-1.5">
+                    <NumberField field={f} value={state[f.id]} disabled={savingId === f.id} onCommit={(n) => saveNumber(f.id, n)} />
+                    {savingId === f.id && <Loader2 size={12} className="animate-spin text-slate-500" />}
+                  </div>
+                ))}
               </div>
             )}
           </div>
