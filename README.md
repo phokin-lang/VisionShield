@@ -84,3 +84,7 @@ Dark navy base (`#05080d`–`#182233`) with a cyan-teal accent (`#3ee6c4`) for
 matching the reference design's safety/surveillance aesthetic. Bounding boxes
 on each camera tile are driven by the `detections[].box` data from the API,
 so real detection coordinates from a model can be dropped in directly.
+
+## Credits
+- Built on top of [67160231-x/VisionShield](https://github.com/67160231-x/VisionShield).
+- The PPE detection model (`ml/model/ppe_hat_vest_nano.pt`, Hard_hat + Vest) was trained by a friend in our project group.
